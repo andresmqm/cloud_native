@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/compras")
@@ -22,6 +23,12 @@ public class CompraController {
         this.compraRepository = compraRepository;
         this.eventoRepository = eventoRepository;
     }
+
+    @GetMapping
+public List<Compra> listarCompras() {
+    return compraRepository.findAll();
+}
+
 
     @PostMapping
     public CompraResponse comprar(@RequestBody CompraRequest request) {
