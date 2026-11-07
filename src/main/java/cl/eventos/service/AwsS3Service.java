@@ -9,7 +9,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 @Service
@@ -38,10 +41,34 @@ public class AwsS3Service {
         log.info("Archivo subido exitosamente a S3: {}", key);
         return key;
     }
+    
+    // Subimos archivo al bucket leyendo desde el disco montado de EFS
+    
+    public String subirArchivo(Long numeroResumen, File file) throws IOException {
+        if (file == null || !file.exists()) {
+            throw new IllegalArgumentException("El archivo en EFS no existe o es nulo");
+        }
+
+        String key = numeroResumen + "/" + file.getName();
+        log.info("Subiendo archivo desde EFS: {} al bucket: {}", key, bucket);
+
+        try (InputStream inputStream = new FileInputStream(file)) {
+            s3Template.upload(bucket, key, inputStream);
+        }
+
+        log.info("Archivo subido exitosamente a S3 desde EFS: {}", key);
+        return key;
+    }
 
     // 2. Modificar archivo 
 
     public String modificarArchivo(Long numeroResumen, MultipartFile file) throws IOException {
+        return subirArchivo(numeroResumen, file);
+    }
+
+    // AGREGADO PARA EFS
+
+    public String modificarArchivo(Long numeroResumen, File file) throws IOException {
         return subirArchivo(numeroResumen, file);
     }
 
