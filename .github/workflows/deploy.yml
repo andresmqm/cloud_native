@@ -31,7 +31,7 @@ jobs:
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/eventos-service:latest
 
-      # Paso 5: Configurar credenciales de AWS, incluyendo AWS_SESSION_TOKEN
+      # Paso 5: Configurar credenciales de AWS
       - name: Set up AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -47,39 +47,35 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      # Paso 6: Conectarse a EC2, levantar Postgres y desplegar el microservicio
+      # Paso 6: Conectarse a EC2 y desplegar el microservicio montando AWS EFS
       - name: SSH commands to deploy
         run: |
           ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.USER_SERVER }}@${{ secrets.EC2_HOST }} << 'EOF'
             # Autenticar en DockerHub desde EC2
-            echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+            echo ${{ secrets.DOCKERHUB_TOKEN }} | sudo docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
-            # Crear la red si no existe
-            docker network create eventos-net || true
+            # Descargar la imagen recién construida
+            sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/eventos-service:latest
 
-            # Levantar Postgres si no existe (conserva los datos en un volumen)
-            docker start postgres-db || docker run -d --name postgres-db --network eventos-net \
-              -v pgdata:/var/lib/postgresql/data \
-              -e POSTGRES_DB=eventos_db \
-              -e POSTGRES_USER=postgres \
-              -e POSTGRES_PASSWORD=secretpostgres \
-              postgres:15
+            # Asegurar permisos de lectura y escritura en la carpeta EFS
+            sudo chmod -R 777 /home/ec2-user/efs
 
-            # Esperar a que Postgres acepte conexiones
-            sleep 15
+            # Eliminar contenedores previos para evitar conflictos de nombre o puertos
+            sudo docker rm -f eventos-service || true
+            sudo docker rm -f eventos-efs || true
 
-            # Descargar la última versión de la imagen
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/eventos-service:latest
-
-            # Parar y eliminar el microservicio anterior
-            docker stop eventos-service || true && docker rm eventos-service || true
-
-            # Iniciar el microservicio conectado a la red
-            docker run -d --name eventos-service --network eventos-net -p 8080:8080 \
+            # Iniciar el contenedor conectándolo a MySQL y montando el volumen EFS
+            sudo docker run -d \
+              --name eventos-service \
+              --network app-network \
+              -p 8081:8081 \
+              -v /home/ec2-user/efs:/app/efs \
+              -e DB_HOST=mysql-db \
+              -e EFS_PATH=/app/efs \
               ${{ secrets.DOCKERHUB_USERNAME }}/eventos-service:latest
 
-            # Verificar que quedó corriendo
-            sleep 20
-            docker ps
-            docker logs eventos-service --tail 20
+            # Esperar arranque de Spring Boot y verificar estado
+            sleep 15
+            sudo docker ps
+            sudo docker logs eventos-service --tail 25
           EOF
