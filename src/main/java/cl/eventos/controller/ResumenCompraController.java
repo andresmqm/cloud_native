@@ -1,5 +1,6 @@
 package cl.eventos.controller;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
@@ -21,7 +22,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
+import com.lowagie.text.Document;
+import com.lowagie.text.Paragraph;
+import com.lowagie.text.pdf.PdfWriter;
+
+import cl.eventos.model.Compra;
+import cl.eventos.repository.CompraRepository;
 import cl.eventos.service.AwsS3Service;
 import cl.eventos.service.EfsService;
 import io.awspring.cloud.s3.S3Resource;
@@ -35,6 +43,45 @@ public class ResumenCompraController {
 
     @Autowired
     private EfsService efsService;
+
+    @Autowired
+    private CompraRepository compraRepository;
+
+    // Genera el archivo físico PDF del resumen leyendo la compra desde MySQL para guardarlo en el PC
+    @GetMapping("/{numeroResumen}/generar")
+    public ResponseEntity<byte[]> generarResumenFisico(@PathVariable Long numeroResumen) {
+        Compra compra = compraRepository.findById(numeroResumen)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Compra no encontrada con ID: " + numeroResumen));
+
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Document document = new Document();
+            PdfWriter.getInstance(document, out);
+            document.open();
+
+            document.add(new Paragraph("=========================================="));
+            document.add(new Paragraph("        RESUMEN DE COMPRA #" + compra.getId()));
+            document.add(new Paragraph("=========================================="));
+            document.add(new Paragraph(" "));
+            document.add(new Paragraph("Evento: " + compra.getEvento().getNombre()));
+            document.add(new Paragraph("Cantidad de entradas: " + compra.getCantidad()));
+            document.add(new Paragraph("Precio unitario: $" + compra.getPrecioUnitario()));
+            document.add(new Paragraph("Total pagado: $" + compra.getPrecioTotal()));
+            document.add(new Paragraph(" "));
+            document.add(new Paragraph("Documento generado para respaldo y carga en S3."));
+
+            document.close();
+
+            byte[] pdfBytes = out.toByteArray();
+            String nombreArchivo = "resumen_" + compra.getId() + ".pdf";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nombreArchivo + "\"")
+                    .body(pdfBytes);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().build();
+        }
+    }
 
     // Lista todos los archivos
     @GetMapping("/{numeroResumen}/objects")
@@ -91,8 +138,7 @@ public class ResumenCompraController {
                                           @RequestParam("archivo") MultipartFile file) {
         try {
             // 1. Guardar en EFS usando el nombre real del archivo
-
-           File archivoEfs = efsService.saveToEfs(file.getOriginalFilename(), file);
+            File archivoEfs = efsService.saveToEfs(file.getOriginalFilename(), file);
 
             // 2. Actualizar en S3
             String key = awsS3Service.modificarArchivo(numeroResumen, archivoEfs);
