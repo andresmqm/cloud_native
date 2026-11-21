@@ -126,7 +126,21 @@ public class TicketService {
                 .orElseThrow(() -> new RuntimeException("Ticket no encontrado"));
         if (detalles.getEstado() != null) ticket.setEstado(detalles.getEstado());
         if (detalles.getPrecio() != null) ticket.setPrecio(detalles.getPrecio());
-        return ticketRepository.save(ticket);
+
+        Ticket actualizado = ticketRepository.save(ticket);
+
+        // Regenerar PDF en EFS y sobrescribir en S3 si existen ruta y clave
+        if (actualizado.getRutaEfs() != null && actualizado.getS3Key() != null) {
+            File archivoLocal = new File(actualizado.getRutaEfs());
+            File parentDir = archivoLocal.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+            generarPdfLocal(archivoLocal, actualizado);
+            subirArchivoS3(archivoLocal, actualizado.getS3Key());
+        }
+
+        return actualizado;
     }
 
     public void eliminarTicket(Long id) {
