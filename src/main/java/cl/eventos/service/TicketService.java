@@ -58,8 +58,8 @@ public class TicketService {
         generarPdfLocal(archivoLocal, ticket);
         ticket.setRutaEfs(archivoLocal.getAbsolutePath());
 
-        // 2. Definir ruta exacta requerida en S3: /{eventoId}/{usuarioId}/{ticketId}.pdf
-        String s3Key = request.getEventoId() + "/" + request.getUsuarioId() + "/" + nombreArchivo;
+        // 2. Guardar en S3 bajo una única carpeta por evento: {eventoId}/{codigoTicket}.pdf
+        String s3Key = request.getEventoId() + "/" + nombreArchivo;
         subirArchivoS3(archivoLocal, s3Key);
         ticket.setS3Key(s3Key);
 
@@ -129,7 +129,6 @@ public class TicketService {
 
         Ticket actualizado = ticketRepository.save(ticket);
 
-        // Regenerar PDF en EFS y sobrescribir en S3 si existen ruta y clave
         if (actualizado.getRutaEfs() != null && actualizado.getS3Key() != null) {
             File archivoLocal = new File(actualizado.getRutaEfs());
             File parentDir = archivoLocal.getParentFile();
@@ -147,7 +146,6 @@ public class TicketService {
         Ticket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Ticket no encontrado"));
 
-        // 1. Eliminar de S3
         try {
             s3Client.deleteObject(DeleteObjectRequest.builder()
                     .bucket(bucketName)
@@ -155,13 +153,11 @@ public class TicketService {
                     .build());
         } catch (Exception ignored) {}
 
-        // 2. Eliminar de EFS temporal
         try {
             Path path = Paths.get(ticket.getRutaEfs());
             Files.deleteIfExists(path);
         } catch (Exception ignored) {}
 
-        // 3. Eliminar de BD
         ticketRepository.delete(ticket);
     }
 
